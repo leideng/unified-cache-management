@@ -25,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <thread>
+#include <vector>
 #include "ibuffered_device.h"
 #include "logger/logger.h"
 #include "thread/latch.h"
@@ -61,6 +62,8 @@ public:
     AscendDevice(const int32_t deviceId, const size_t bufferSize, const size_t bufferNumber)
         : IBufferedDevice{deviceId, bufferSize, bufferNumber}, stop_{false}, stream_{nullptr}
     {
+        // Initialize batch streams pool (use 8 streams for parallel batch operations)
+        batchStreams_.resize(8, nullptr);
     }
     ~AscendDevice() override
     {
@@ -69,6 +72,13 @@ public:
             (void)aclrtUnSubscribeReport(tid, this->stream_);
             this->stop_ = true;
             this->cbThread_.join();
+        }
+        // Destroy batch streams
+        for (auto& bs : this->batchStreams_) {
+            if (bs) {
+                (void)aclrtDestroyStream(bs);
+                bs = nullptr;
+            }
         }
         if (this->stream_) {
             (void)aclrtDestroyStream(this->stream_);
@@ -82,6 +92,10 @@ public:
         if ((status = ASCEND_API(aclrtSetDevice, this->deviceId)).Failure()) { return status; }
         if ((status = IBufferedDevice::Setup()).Failure()) { return status; }
         if ((status = ASCEND_API(aclrtCreateStream, &this->stream_)).Failure()) { return status; }
+        // Create batch streams for parallel operations
+        for (auto& bs : this->batchStreams_) {
+            if ((status = ASCEND_API(aclrtCreateStream, &bs)).Failure()) { return status; }
+        }
         this->cbThread_ = std::thread([this] {
             while (!this->stop_) { (void)aclrtProcessReport(10); }
         });
@@ -123,8 +137,17 @@ public:
     Status H2DBatchSync(std::byte* dArr[], const std::byte* hArr[], const size_t number,
                         const size_t count) override
     {
+        // Distribute transfers across multiple streams for true parallelism
+        const size_t numStreams = this->batchStreams_.size();
         for (size_t i = 0; i < number; i++) {
-            auto status = this->H2DSync(dArr[i], hArr[i], count);
+            void* stream = this->batchStreams_[i % numStreams];
+            auto status = ASCEND_API(aclrtMemcpyAsync, dArr[i], count, hArr[i], count,
+                                     ACL_MEMCPY_HOST_TO_DEVICE, stream);
+            if (status.Failure()) { return status; }
+        }
+        // Synchronize all batch streams
+        for (auto bs : this->batchStreams_) {
+            auto status = ASCEND_API(aclrtSynchronizeStream, bs);
             if (status.Failure()) { return status; }
         }
         return Status::OK();
@@ -132,8 +155,17 @@ public:
     Status D2HBatchSync(std::byte* hArr[], const std::byte* dArr[], const size_t number,
                         const size_t count) override
     {
+        // Distribute transfers across multiple streams for true parallelism
+        const size_t numStreams = this->batchStreams_.size();
         for (size_t i = 0; i < number; i++) {
-            auto status = this->D2HSync(hArr[i], dArr[i], count);
+            void* stream = this->batchStreams_[i % numStreams];
+            auto status = ASCEND_API(aclrtMemcpyAsync, hArr[i], count, dArr[i], count,
+                                     ACL_MEMCPY_DEVICE_TO_HOST, stream);
+            if (status.Failure()) { return status; }
+        }
+        // Synchronize all batch streams
+        for (auto bs : this->batchStreams_) {
+            auto status = ASCEND_API(aclrtSynchronizeStream, bs);
             if (status.Failure()) { return status; }
         }
         return Status::OK();
@@ -152,6 +184,7 @@ private:
     std::atomic_bool stop_;
     void* stream_;
     std::thread cbThread_;
+    std::vector<void*> batchStreams_;  // Pool of streams for parallel batch operations
 };
 
 std::unique_ptr<IDevice> DeviceFactory::Make(const int32_t deviceId, const size_t bufferSize,
