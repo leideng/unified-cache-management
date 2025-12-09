@@ -150,7 +150,8 @@ public:
             auto status = ASCEND_API(aclrtSynchronizeStream, bs);
             if (status.Failure()) { return status; }
         }
-        return Status::OK();
+        // Synchronize main stream to ensure complete synchronization point (matches CudaDevice contract)
+        return this->Synchronized();
     }
     Status D2HBatchSync(std::byte* hArr[], const std::byte* dArr[], const size_t number,
                         const size_t count) override
@@ -168,7 +169,8 @@ public:
             auto status = ASCEND_API(aclrtSynchronizeStream, bs);
             if (status.Failure()) { return status; }
         }
-        return Status::OK();
+        // Synchronize main stream to ensure complete synchronization point (matches CudaDevice contract)
+        return this->Synchronized();
     }
 
 protected:
