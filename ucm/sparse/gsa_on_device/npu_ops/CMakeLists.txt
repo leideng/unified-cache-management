@@ -65,15 +65,13 @@ if (BUILD_OPEN_PROJECT)
 
     # op api
     add_library(opapi SHARED)
-    # When compiling a specified operator without aclnn src
-    if (NOT "${ASCEND_OP_NAME}" STREQUAL "ALL")
-        add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
-            COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
-            )
-        target_sources(opapi PRIVATE
-            ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
-        )
-    endif()
+    # Stub source needed for shared library (required when ASCEND_OP_NAME is ALL or when building specific ops)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
+        COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
+    )
+    target_sources(opapi PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/opapi_stub.cpp
+    )
 
     target_compile_options(opapi PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++1z>
@@ -125,6 +123,7 @@ if (BUILD_OPEN_PROJECT)
     target_link_libraries(opsproto PRIVATE
             $<BUILD_INTERFACE:intf_pub>
             $<BUILD_INTERFACE:ops_utils_proto_headers>
+            $<BUILD_INTERFACE:alog_headers>
             -Wl,--whole-archive
             rt2_registry
             -Wl,--no-whole-archive
@@ -162,6 +161,7 @@ if (BUILD_OPEN_PROJECT)
     target_link_libraries(optiling PRIVATE
             $<BUILD_INTERFACE:intf_pub>
             $<BUILD_INTERFACE:ops_utils_tiling_headers>
+            $<BUILD_INTERFACE:alog_headers>
             -Wl,--whole-archive
             rt2_registry
             -Wl,--no-whole-archive

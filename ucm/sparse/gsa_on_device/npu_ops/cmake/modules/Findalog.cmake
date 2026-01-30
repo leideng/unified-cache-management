@@ -45,8 +45,20 @@ unset(_cmake_expected_targets)
 
 find_path(_INCLUDE_DIR
     NAMES base/alog_pub.h
+    HINTS ${CMAKE_PREFIX_PATH}
     NO_CMAKE_SYSTEM_PATH
     NO_CMAKE_FIND_ROOT_PATH)
+
+# Fallback to stub include when toolkit does not provide base/alog_pub.h
+# (e.g. minimal CANN layout or alternate install structure)
+if(NOT _INCLUDE_DIR)
+    set(_ALOG_STUB_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../stub_include")
+    if(EXISTS "${_ALOG_STUB_INCLUDE}/base/alog_pub.h")
+        set(_INCLUDE_DIR "${_ALOG_STUB_INCLUDE}")
+        message(STATUS "Using stub base/alog_pub.h from ${_ALOG_STUB_INCLUDE}")
+    endif()
+    unset(_ALOG_STUB_INCLUDE)
+endif()
 
 find_library(slog_SHARED_LIBRARY
     NAMES libascendalog.so

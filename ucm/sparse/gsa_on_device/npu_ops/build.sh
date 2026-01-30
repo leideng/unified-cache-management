@@ -175,6 +175,12 @@ fi
 
 CUSTOM_OPTION="${CUSTOM_OPTION} -DCUSTOM_ASCEND_CANN_PACKAGE_PATH=${ASCEND_CANN_PACKAGE_PATH} -DCHECK_COMPATIBLE=${CHECK_COMPATIBLE}"
 
+# CANN opc/TBE is incompatible with NumPy 2.x (np.float_ removed). Skip kernel build when NumPy >= 2.
+if python3 -c "import numpy; exit(0 if int(numpy.__version__.split('.')[0]) >= 2 else 1)" 2>/dev/null; then
+    log "Info: NumPy 2.x detected; disabling ops kernel build (CANN opc requires NumPy < 2). Install 'numpy<2' to build kernels."
+    CUSTOM_OPTION="${CUSTOM_OPTION} -DENABLE_OPS_KERNEL=OFF"
+fi
+
 set_env
 clean
 
